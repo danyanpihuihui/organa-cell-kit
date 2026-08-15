@@ -53,7 +53,7 @@ def _verify_public_candidate(config) -> dict:
     files = {}
     try:
         for relative in required:
-            url = f"{base_url}/{relative}" if relative.startswith(".well-known/") else f"{version_base}/{relative}"
+            url = f"{version_base}/{relative}"
             request = Request(url, headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "organa-cell-kit/0.1"})
             with urlopen(request, timeout=60) as response:
                 files[relative] = json.loads(response.read().decode("utf-8"))

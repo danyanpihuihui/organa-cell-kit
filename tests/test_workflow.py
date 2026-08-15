@@ -82,6 +82,34 @@ def test_doctor_explains_human_actions_and_never_share_boundary(tmp_path: Path):
     assert result["next_action"] == "Run build, then verify."
 
 
+def test_public_verifier_downloads_version_scoped_candidate_resolver(tmp_path: Path, monkeypatch):
+    from organa_cell_kit.workflow import _verify_public_candidate
+
+    seen = []
+
+    class Response:
+        def __init__(self, value):
+            self.value = value
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return json.dumps(self.value).encode()
+
+    def fake_urlopen(request, timeout):
+        seen.append(request.full_url)
+        if request.full_url.endswith("/v1/verify/package"):
+            return Response({"ok": True, "integrity_valid": True, "status": "integrity-valid"})
+        return Response({"resources": []})
+
+    monkeypatch.setattr("organa_cell_kit.workflow.urlopen", fake_urlopen)
+    _verify_public_candidate({"base_url": BASE_URL, "version": "0.3.0", "coordinate": COORDINATE, "verifier_base_url": "https://verifier.test"})
+
+    assert f"{BASE_URL}/versions/0.3.0/.well-known/organa.json" in seen
+    assert f"{BASE_URL}/.well-known/organa.json" not in seen
+
+
 def test_record_signature_requires_public_production_verifier_success(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("organa_cell_kit.workflow._bip322_verify", lambda address, message, signature: (True, ""))
     monkeypatch.setattr(
