@@ -7,7 +7,9 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
 
 COORDINATE_RE = re.compile(r"^[0-9]+\.bitmap$")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -33,6 +35,57 @@ def _bip322_verify(address: str, message: str, signature: str) -> tuple[bool, st
         payload=json.loads(proc.stdout or "{}")
     except Exception as exc:return False,str(exc)
     return proc.returncode==0 and payload.get("ok") is True, payload.get("error") or proc.stderr or "invalid BIP-322 signature"
+
+
+def _verify_public_candidate(config) -> dict:
+    base_url = config["base_url"]
+    version = config["version"]
+    version_base = f"{base_url}/versions/{version}"
+    required = [
+        ".well-known/organa.json",
+        "organa-cell.json",
+        "signature-request.json",
+        "agent-registry.json",
+        "service-registry.json",
+        "proof-index.json",
+        "disclosure-policy.json",
+    ]
+    files = {}
+    try:
+        for relative in required:
+            url = f"{base_url}/{relative}" if relative.startswith(".well-known/") else f"{version_base}/{relative}"
+            request = Request(url, headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "organa-cell-kit/0.1"})
+            with urlopen(request, timeout=60) as response:
+                files[relative] = json.loads(response.read().decode("utf-8"))
+        manifest = files["organa-cell.json"]
+        for resource in manifest.get("resources", []):
+            relative = resource.get("path")
+            if not isinstance(relative, str) or relative in files:
+                continue
+            request = Request(f"{version_base}/{quote(relative, safe='/')}", headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "organa-cell-kit/0.1"})
+            with urlopen(request, timeout=60) as response:
+                files[relative] = json.loads(response.read().decode("utf-8"))
+        payload = json.dumps({"files": files}, ensure_ascii=False).encode("utf-8")
+        verifier_url = f"{config['verifier_base_url']}/v1/verify/package"
+        request = Request(verifier_url, data=payload, method="POST", headers={"Accept": "application/json", "Content-Type": "application/json", "Cache-Control": "no-cache", "User-Agent": "organa-cell-kit/0.1"})
+        with urlopen(request, timeout=60) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            result = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            result = {"ok": False, "status": "verifier-http-error", "errors": [f"HTTP {exc.code}"]}
+    except (URLError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
+        result = {"ok": False, "status": "verifier-unavailable", "errors": [str(exc)]}
+    return result if isinstance(result, dict) else {"ok": False, "status": "malformed-verifier-response", "errors": ["JSON object required"]}
+
+
+def _require_public_verifier(config) -> dict:
+    result = _verify_public_candidate(config)
+    if result.get("ok") is not True or result.get("integrity_valid") is not True:
+        detail = result.get("errors") or result.get("status") or "unknown verification failure"
+        raise CellKitError("production verifier must fully validate the published candidate before signing or activation: " + str(detail))
+    return result
 
 
 def _derive_stage(config, dist: Path) -> tuple[str, list[str]]:
@@ -188,9 +241,10 @@ def record_signature(project: Path, *, signature: str):
     if manifest_hash!=state.get('manifest_sha256') or request.get('manifest_sha256')!=manifest_hash or request.get('message')!=_expected_message(config,manifest_hash):raise CellKitError('candidate changed after verification or message binding is invalid')
     valid,error=_bip322_verify(config['controller_address'],request['message'],signature)
     if not valid:raise CellKitError('BIP-322 signature invalid: '+error)
+    public_verification=_require_public_verifier(config)
     claim={"schema_version":"organa-controller-claim-v0.1","coordinate":config['coordinate'],"controller_address":config['controller_address'],"claim_status":"signed","signature_method":request['signature_method'],"message_encoding":"UTF-8","manifest_url":request['manifest_url'],"manifest_sha256":request['manifest_sha256'],"message":request['message'],"message_sha256":request['message_sha256'],"signature":signature,"signature_valid":True}
     _write(version_dir/'controller-claim.json',claim)
-    return _set_stage(project,'signed',controller_claim_sha256=_sha((version_dir/'controller-claim.json').read_bytes()),manifest_sha256=manifest_hash)
+    return _set_stage(project,'signed',controller_claim_sha256=_sha((version_dir/'controller-claim.json').read_bytes()),manifest_sha256=manifest_hash,public_verifier_status=public_verification.get('status'))
 
 
 def activate(project: Path):
@@ -200,9 +254,10 @@ def activate(project: Path):
     manifest_hash=_sha((version_dir/'organa-cell.json').read_bytes())
     valid,error=_bip322_verify(config['controller_address'],request['message'],claim.get('signature',''))
     if manifest_hash!=state.get('manifest_sha256') or claim.get('manifest_sha256')!=manifest_hash or claim.get('message')!=_expected_message(config,manifest_hash) or not valid:raise CellKitError('activation preflight failed: '+error)
+    public_verification=_require_public_verifier(config)
     resolver['activation_status']='active';resolver['current_manifest']['lifecycle_status']='live';resolver['controller_claim'].update({'status':'signed','signed_claim_url':f"{config['base_url']}/versions/{config['version']}/controller-claim.json",'signed_claim_sha256':_sha(claim_path.read_bytes())})
     _write(dist/'.well-known/organa.json',resolver)
-    return _set_stage(project,'active',canonical_resolver=str(dist/'.well-known/organa.json'),manifest_sha256=manifest_hash,controller_claim_sha256=_sha(claim_path.read_bytes()))
+    return _set_stage(project,'active',canonical_resolver=str(dist/'.well-known/organa.json'),manifest_sha256=manifest_hash,controller_claim_sha256=_sha(claim_path.read_bytes()),public_verifier_status=public_verification.get('status'))
 
 
 def doctor(project: Path):

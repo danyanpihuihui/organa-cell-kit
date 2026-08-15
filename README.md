@@ -91,6 +91,8 @@ Recomputes every resource hash plus Manifest and message hashes. Completion crit
 
 Upload the exact `dist/` bytes to the configured HTTPS base URL, then confirm every URL in `publish-plan.json` is reachable. Do not sign before this check.
 
+`sign` and `activate` now enforce this boundary automatically: the kit downloads the public candidate bytes and submits the complete package to the configured production Proof Verifier. If Schema validation, resource hashes, missing/unsafe resources, or cross-references fail—or the verifier is unavailable—the transition fails closed.
+
 ### 5. Sign
 
 The Bitmap controller personally signs the exact message in:
