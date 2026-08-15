@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "organa-cell-kit"
+version = "0.1.0"
+description = "Reproducible lifecycle tools for public Organa Bitmap Cells."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Organa"}]
+
+[project.scripts]
+organa-cell-kit = "organa_cell_kit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/organa_cell_kit"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
