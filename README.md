@@ -23,8 +23,12 @@ It does **not** own, transfer or register a Bitmap. The controller remains respo
 Requires Python 3.9+.
 
 ```bash
+git clone https://github.com/danyanpihuihui/organa-cell-kit.git
+cd organa-cell-kit
 python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -e .
+organa-cell-kit --help
 ```
 
 ## Workflow
@@ -34,12 +38,22 @@ python3 -m venv .venv
 ```bash
 organa-cell-kit init ./my-cell \
   --coordinate 123456.bitmap \
-  --controller-address bc1q... \
+  --controller-address bc1qe45ynsz8tkky0nmxfuvjga7z0lwkalfkxkdln6 \
   --base-url https://OWNER.github.io/organa-cell-123456 \
   --cell-name "Independent Research Cell"
 ```
 
 Completion criterion: `cell-kit.json` exists and `status` reports `initialized`.
+
+### Preflight doctor
+
+At any point after initialization:
+
+```bash
+organa-cell-kit doctor ./my-cell
+```
+
+Doctor re-runs artifact integrity checks when a build exists, keeps independent adoption at `claimed-not-verified`, and lists human-only wallet and publication actions. It does not certify controller independence; only the external Network Registry can do that after evidence review.
 
 ### 2. Build
 
@@ -89,11 +103,10 @@ Use BIP-322 Simple Message Signing. Independently verify the exact message/addre
 
 ```bash
 organa-cell-kit sign ./my-cell \
-  --signature 'BIP322_SIGNATURE' \
-  --signature-valid
+  --signature 'BIP322_SIGNATURE'
 ```
 
-The flag is an explicit assertion; the CLI does not pretend an unverified string is valid.
+The CLI runs a local `bip322-js` verifier against the exact UTF-8 message, configured controller address and supplied signature. Empty, placeholder or cryptographically invalid signatures fail closed.
 
 ### 6. Activate
 

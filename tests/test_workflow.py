@@ -49,7 +49,8 @@ def test_state_machine_requires_verify_before_publish_and_signature_before_activ
         activate(tmp_path)
 
 
-def test_record_signature_and_activate_preserve_signed_manifest_bytes(tmp_path: Path):
+def test_record_signature_and_activate_preserve_signed_manifest_bytes(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("organa_cell_kit.workflow._bip322_verify", lambda address, message, signature: (signature == "valid-signature", "invalid"))
     init(tmp_path, coordinate=COORDINATE, controller_address=ADDRESS, base_url=BASE_URL, cell_name="Independent Research Cell")
     build(tmp_path)
     verify(tmp_path)
@@ -57,7 +58,7 @@ def test_record_signature_and_activate_preserve_signed_manifest_bytes(tmp_path: 
     manifest = tmp_path / "dist" / "versions" / "0.1.0" / "organa-cell.json"
     before = manifest.read_bytes()
 
-    claim = record_signature(tmp_path, signature="test-bip322-signature", signature_valid=True)
+    claim = record_signature(tmp_path, signature="valid-signature")
     activated = activate(tmp_path)
 
     assert claim["stage"] == "signed"
@@ -80,10 +81,11 @@ def test_doctor_explains_human_actions_and_never_share_boundary(tmp_path: Path):
     assert result["next_action"] == "Run build, then verify."
 
 
-def test_fail_closed_on_invalid_config_and_false_signature(tmp_path: Path):
+def test_fail_closed_on_invalid_config_and_false_signature(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("organa_cell_kit.workflow._bip322_verify", lambda address, message, signature: (False, "invalid"))
     with pytest.raises(CellKitError):
         init(tmp_path, coordinate="bad", controller_address=ADDRESS, base_url=BASE_URL, cell_name="Bad")
     init(tmp_path, coordinate=COORDINATE, controller_address=ADDRESS, base_url=BASE_URL, cell_name="Independent Research Cell")
     build(tmp_path); verify(tmp_path); publish_candidate(tmp_path)
     with pytest.raises(CellKitError, match="valid"):
-        record_signature(tmp_path, signature="bad", signature_valid=False)
+        record_signature(tmp_path, signature="bad")

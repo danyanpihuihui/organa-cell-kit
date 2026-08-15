@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,24 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 class CellKitError(ValueError):
     pass
+
+
+def _expected_message(config, manifest_hash: str) -> str:
+    base=f"{config['base_url']}/versions/{config['version']}"
+    return f"Organa Cell Controller Claim v0.1\nDomain: organa-cell-controller-claim\nBitcoin network: mainnet\nCoordinate: {config['coordinate']}\nController address: {config['controller_address']}\nCell manifest: {base}/organa-cell.json\nCell manifest SHA-256: {manifest_hash}\nVersion: {config['version']}\nSafety: This message does not transfer assets, authorize spending, create a transaction, PSBT, fee, or miner payment."
+
+
+def _bip322_verify(address: str, message: str, signature: str) -> tuple[bool, str]:
+    if not isinstance(signature, str) or not signature.strip() or signature in {"test-bip322-signature", "NOT_A_BIP322_SIGNATURE"}:
+        return False, "empty or placeholder signature"
+    node=shutil.which("node")
+    script=Path(__file__).resolve().parents[2]/"scripts"/"verify_bip322.js"
+    if not node or not script.is_file():return False,"BIP-322 verifier unavailable"
+    try:
+        proc=subprocess.run([node,str(script)],input=json.dumps({"signing_address":address,"message":message,"signature":signature}),text=True,capture_output=True,timeout=20)
+        payload=json.loads(proc.stdout or "{}")
+    except Exception as exc:return False,str(exc)
+    return proc.returncode==0 and payload.get("ok") is True, payload.get("error") or proc.stderr or "invalid BIP-322 signature"
 
 
 def _json(path: Path):
@@ -102,7 +121,7 @@ def build(project: Path):
     manifest={"schema_version":"organa-cell-resolution-v0.1","coordinate":config['coordinate'],"cell_type":"organa-cell","title":config['cell_name'],"version":version,"created_at_utc":datetime.now(timezone.utc).isoformat(),"lifecycle_status":"pending","state_semantics":{"lifecycle_status":"declared object lifecycle","activation_status":"canonical publication activation","controller_signature_status":"controller authentication state","canonical_state_source":".well-known/organa.json"},"controller":{"address":config['controller_address'],"claim_type":"bitmap-controller-wallet-claim","signature_status":"pending-user-signature","signature_request_url":base+'/signature-request.json'},"public_base_url":base,"agents":agents,"services":services,"resources":resources,"disclosure_policy_url":base+'/disclosure-policy.json',"proof_index_url":base+'/proof-index.json'}
     _write(version_dir/'organa-cell.json',manifest)
     manifest_hash=_sha((version_dir/'organa-cell.json').read_bytes())
-    message=f"Organa Cell Controller Claim v0.1\nDomain: organa-cell-controller-claim\nBitcoin network: mainnet\nCoordinate: {config['coordinate']}\nController address: {config['controller_address']}\nCell manifest: {base}/organa-cell.json\nCell manifest SHA-256: {manifest_hash}\nVersion: {version}\nSafety: This message does not transfer assets, authorize spending, create a transaction, PSBT, fee, or miner payment."
+    message=_expected_message(config,manifest_hash)
     request={"schema_version":"organa-controller-signature-request-v0.1","coordinate":config['coordinate'],"controller_address":config['controller_address'],"manifest_url":base+'/organa-cell.json',"manifest_sha256":manifest_hash,"signature_method":"BIP-322-simple-message-signature","message_encoding":"UTF-8","message":message,"message_sha256":_sha(message.encode()),"safety_notice":"Message signing only; no transaction, transfer, PSBT or fee."}
     _write(version_dir/'signature-request.json',request)
     discovery={"schema_version":"organa-well-known-v0.1","coordinate":config['coordinate'],"cell_type":"organa-cell","current_manifest":{"url":base+'/organa-cell.json',"sha256":manifest_hash,"version":version,"lifecycle_status":"pending"},"activation_status":"awaiting-controller-signature","controller_claim":{"status":"pending-user-signature","signature_request_url":base+'/signature-request.json','signature_request_sha256':_sha((version_dir/'signature-request.json').read_bytes()),"signature_method":"BIP-322-simple-message-signature"}}
@@ -121,8 +140,11 @@ def verify(project: Path):
         path=version_dir/item['path']
         if not path.is_file() or _sha(path.read_bytes())!=item['sha256']:errors.append('resource mismatch: '+item['path'])
     request=_json(version_dir/'signature-request.json')
-    if request.get('manifest_sha256')!=_sha((version_dir/'organa-cell.json').read_bytes()):errors.append('manifest hash mismatch')
-    if request.get('message_sha256')!=_sha(request.get('message','').encode()):errors.append('message hash mismatch')
+    manifest_hash=_sha((version_dir/'organa-cell.json').read_bytes())
+    if request.get('manifest_sha256')!=manifest_hash:errors.append('manifest hash mismatch')
+    expected_message=_expected_message(config,manifest_hash)
+    if request.get('message')!=expected_message:errors.append('signature message is not canonically bound to config and manifest')
+    if request.get('message_sha256')!=_sha(expected_message.encode()):errors.append('message hash mismatch')
     if errors:return {"ok":False,"stage":state['stage'],"errors":errors}
     if state['stage'] in {'built','verified'}:state=_set_stage(project,'verified',manifest_sha256=request['manifest_sha256'])
     return {"ok":True,**state,"errors":[]}
@@ -131,42 +153,58 @@ def verify(project: Path):
 def publish_candidate(project: Path):
     project, config, state, dist = _load(project)
     if state['stage']!='verified':raise CellKitError('publish-candidate requires verified stage')
+    check=verify(project)
+    if not check.get('ok') or check.get('manifest_sha256')!=state.get('manifest_sha256'):raise CellKitError('publish-candidate requires verified unchanged artifacts')
     # Publication transport is intentionally external; this freezes a deterministic publish plan.
     plan={"schema_version":"organa-publish-plan-v0.1","stage":"candidate-published","base_url":config['base_url'],"publish_root":str(dist),"required_public_urls":[config['base_url']+'/.well-known/organa.json',f"{config['base_url']}/versions/{config['version']}/organa-cell.json",f"{config['base_url']}/versions/{config['version']}/signature-request.json"],"instruction":"Upload dist without changing bytes, then verify every URL before wallet signing."}
     _write(project/'publish-plan.json',plan)
-    return _set_stage(project,'candidate-published',publish_plan=str(project/'publish-plan.json'))
+    return _set_stage(project,'candidate-published',publish_plan=str(project/'publish-plan.json'),manifest_sha256=state['manifest_sha256'])
 
 
-def record_signature(project: Path, *, signature: str, signature_valid: bool):
+def record_signature(project: Path, *, signature: str):
     project, config, state, dist = _load(project)
     if state['stage']!='candidate-published':raise CellKitError('sign requires candidate-published stage')
-    if not signature_valid:raise CellKitError('signature must be independently valid')
     version_dir=dist/'versions'/config['version'];request=_json(version_dir/'signature-request.json')
+    manifest_hash=_sha((version_dir/'organa-cell.json').read_bytes())
+    if manifest_hash!=state.get('manifest_sha256') or request.get('manifest_sha256')!=manifest_hash or request.get('message')!=_expected_message(config,manifest_hash):raise CellKitError('candidate changed after verification or message binding is invalid')
+    valid,error=_bip322_verify(config['controller_address'],request['message'],signature)
+    if not valid:raise CellKitError('BIP-322 signature invalid: '+error)
     claim={"schema_version":"organa-controller-claim-v0.1","coordinate":config['coordinate'],"controller_address":config['controller_address'],"claim_status":"signed","signature_method":request['signature_method'],"message_encoding":"UTF-8","manifest_url":request['manifest_url'],"manifest_sha256":request['manifest_sha256'],"message":request['message'],"message_sha256":request['message_sha256'],"signature":signature,"signature_valid":True}
     _write(version_dir/'controller-claim.json',claim)
-    return _set_stage(project,'signed',controller_claim_sha256=_sha((version_dir/'controller-claim.json').read_bytes()))
+    return _set_stage(project,'signed',controller_claim_sha256=_sha((version_dir/'controller-claim.json').read_bytes()),manifest_sha256=manifest_hash)
 
 
 def activate(project: Path):
     project, config, state, dist = _load(project)
     if state['stage']!='signed':raise CellKitError('activate requires valid signature')
-    resolver=_json(dist/'.well-known/organa.json');version_dir=dist/'versions'/config['version'];claim_path=version_dir/'controller-claim.json'
+    resolver=_json(dist/'.well-known/organa.json');version_dir=dist/'versions'/config['version'];claim_path=version_dir/'controller-claim.json';claim=_json(claim_path);request=_json(version_dir/'signature-request.json')
+    manifest_hash=_sha((version_dir/'organa-cell.json').read_bytes())
+    valid,error=_bip322_verify(config['controller_address'],request['message'],claim.get('signature',''))
+    if manifest_hash!=state.get('manifest_sha256') or claim.get('manifest_sha256')!=manifest_hash or claim.get('message')!=_expected_message(config,manifest_hash) or not valid:raise CellKitError('activation preflight failed: '+error)
     resolver['activation_status']='active';resolver['current_manifest']['lifecycle_status']='live';resolver['controller_claim'].update({'status':'signed','signed_claim_url':f"{config['base_url']}/versions/{config['version']}/controller-claim.json",'signed_claim_sha256':_sha(claim_path.read_bytes())})
     _write(dist/'.well-known/organa.json',resolver)
-    return _set_stage(project,'active',canonical_resolver=str(dist/'.well-known/organa.json'))
+    return _set_stage(project,'active',canonical_resolver=str(dist/'.well-known/organa.json'),manifest_sha256=manifest_hash,controller_claim_sha256=_sha(claim_path.read_bytes()))
 
 
 def doctor(project: Path):
     project, config, state, dist = _load(project)
+    artifact_check = None
+    if state["stage"] != "initialized":
+        try:
+            artifact_check = verify(project)
+        except Exception as exc:
+            artifact_check = {"ok": False, "errors": [str(exc)]}
+    independence = {"status": "claimed-not-verified", "verified": False, "note": "Independent adoption is determined externally by the Organa Network Registry after controller uniqueness, public hosting, valid BIP-322 proof and public task evidence are checked."}
     checks = {
         "coordinate_format": bool(COORDINATE_RE.fullmatch(config.get("coordinate", ""))),
         "controller_address_present": isinstance(config.get("controller_address"), str) and len(config["controller_address"]) >= 14,
         "stable_https_base_url": urlparse(config.get("base_url", "")).scheme == "https",
-        "distinct_controller_not_yet_verified": config.get("controller_independence") == "independent-controller-claimed-not-yet-verified",
+        "independence_claim_present": config.get("controller_independence") == "independent-controller-claimed-not-yet-verified",
         "public_only_disclosure": config.get("disclosure_policy") == "public-metadata-and-proof-only",
-        "wallet_safety_acknowledgement_required": True,
+        "wallet_safety_acknowledgement": "human-confirmation-required",
     }
-    blockers = [name for name, passed in checks.items() if not passed]
+    blockers = [name for name, passed in checks.items() if passed is False]
+    if artifact_check is not None and not artifact_check.get("ok"):blockers.append("artifact_integrity_or_state")
     next_action = {
         "initialized": "Run build, then verify.",
         "built": "Run verify and fix every reported error.",
@@ -175,7 +213,7 @@ def doctor(project: Path):
         "signed": "Run activate and publish the updated Canonical Resolver.",
         "active": "Complete a public task and request independent-controller verification before network registration.",
     }.get(state["stage"], "Inspect project state.")
-    return {"ok": not blockers, "stage": state["stage"], "checks": checks, "blockers": blockers, "next_action": next_action, "human_required": ["Confirm Bitmap control", "Publish from participant-owned account", "Personally approve final BIP-322 wallet signature"], "never_share": ["seed phrase", "private key", "wallet password", "transaction", "PSBT", "API key"]}
+    return {"ok": not blockers, "stage": state["stage"], "checks": checks, "artifact_verification": artifact_check, "independent_adoption": independence, "blockers": blockers, "next_action": next_action, "human_required": ["Confirm Bitmap control", "Publish from participant-owned account", "Personally approve final BIP-322 wallet signature"], "never_share": ["seed phrase", "private key", "wallet password", "transaction", "PSBT", "API key"]}
 
 
 def status(project: Path):

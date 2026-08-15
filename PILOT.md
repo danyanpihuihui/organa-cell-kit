@@ -79,7 +79,7 @@ The purpose is to prove discovery, authorization, execution, receipt and verific
 
 ## How to join
 
-Open the **Independent Cell Pilot** issue in the Cell Kit repository. Only provide:
+Open the [Independent Cell Pilot issue](https://github.com/danyanpihuihui/organa-cell-kit/issues/new?template=independent-cell-pilot.yml) in the Cell Kit repository. Only provide:
 
 - proposed Bitmap Coordinate;
 - public controller address;
