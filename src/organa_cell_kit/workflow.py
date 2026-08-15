@@ -156,6 +156,28 @@ def activate(project: Path):
     return _set_stage(project,'active',canonical_resolver=str(dist/'.well-known/organa.json'))
 
 
+def doctor(project: Path):
+    project, config, state, dist = _load(project)
+    checks = {
+        "coordinate_format": bool(COORDINATE_RE.fullmatch(config.get("coordinate", ""))),
+        "controller_address_present": isinstance(config.get("controller_address"), str) and len(config["controller_address"]) >= 14,
+        "stable_https_base_url": urlparse(config.get("base_url", "")).scheme == "https",
+        "distinct_controller_not_yet_verified": config.get("controller_independence") == "independent-controller-claimed-not-yet-verified",
+        "public_only_disclosure": config.get("disclosure_policy") == "public-metadata-and-proof-only",
+        "wallet_safety_acknowledgement_required": True,
+    }
+    blockers = [name for name, passed in checks.items() if not passed]
+    next_action = {
+        "initialized": "Run build, then verify.",
+        "built": "Run verify and fix every reported error.",
+        "verified": "Run publish-candidate and upload exact dist bytes.",
+        "candidate-published": "Verify public URLs, personally sign the exact BIP-322 message, then independently verify it.",
+        "signed": "Run activate and publish the updated Canonical Resolver.",
+        "active": "Complete a public task and request independent-controller verification before network registration.",
+    }.get(state["stage"], "Inspect project state.")
+    return {"ok": not blockers, "stage": state["stage"], "checks": checks, "blockers": blockers, "next_action": next_action, "human_required": ["Confirm Bitmap control", "Publish from participant-owned account", "Personally approve final BIP-322 wallet signature"], "never_share": ["seed phrase", "private key", "wallet password", "transaction", "PSBT", "API key"]}
+
+
 def status(project: Path):
     _, config, state, dist = _load(project)
     return {**state,"coordinate":config['coordinate'],"dist_exists":dist.is_dir()}

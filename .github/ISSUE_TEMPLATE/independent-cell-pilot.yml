@@ -1,0 +1,57 @@
+name: Independent Cell Pilot
+about: Apply to deploy an independently controlled Bitmap as an Organa Cell
+labels: [independent-cell-pilot]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read PILOT.md first. This issue is public. Never post a seed phrase, private key, wallet password, transaction, PSBT, API key or any private strategy/data.
+  - type: input
+    id: coordinate
+    attributes:
+      label: Proposed Bitmap Coordinate
+      placeholder: 123456.bitmap
+    validations:
+      required: true
+  - type: input
+    id: address
+    attributes:
+      label: Public controller address
+      description: Public address only. Never provide a private key or seed phrase.
+    validations:
+      required: true
+  - type: input
+    id: github
+    attributes:
+      label: Participant-owned GitHub username
+    validations:
+      required: true
+  - type: input
+    id: role
+    attributes:
+      label: Proposed Cell name and public role
+      placeholder: Public Artifact Verification Cell
+    validations:
+      required: true
+  - type: dropdown
+    id: task
+    attributes:
+      label: Will you publish one small public test task or service result?
+      options:
+        - "Yes"
+        - "Not yet — I need help choosing a safe public task"
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety acknowledgement
+      options:
+        - label: I understand Organa does not need custody or transfer of my Bitmap.
+          required: true
+        - label: I will personally approve the final BIP-322 message signature.
+          required: true
+        - label: I will not share a seed phrase, private key, wallet password, transaction, PSBT or API key.
+          required: true
+        - label: I understand independent adoption is not counted until the deployed Claim is independently verified.
+          required: true

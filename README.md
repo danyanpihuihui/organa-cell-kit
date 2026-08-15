@@ -119,6 +119,10 @@ A Cell counts as independent external adoption only when all are true:
 5. The new Cell completes at least one public task or service call;
 6. The Organa Network Registry labels it `independent-controller-verified`.
 
+## Independent Cell pilot
+
+Want to deploy the first externally controlled Organa Cell? Read [PILOT.md](PILOT.md), then open the Independent Cell Pilot issue. Never post a seed phrase, private key, password, signature secret, transaction or PSBT.
+
 ## Tests
 
 ```bash
