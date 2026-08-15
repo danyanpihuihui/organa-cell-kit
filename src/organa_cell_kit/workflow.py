@@ -35,6 +35,25 @@ def _bip322_verify(address: str, message: str, signature: str) -> tuple[bool, st
     return proc.returncode==0 and payload.get("ok") is True, payload.get("error") or proc.stderr or "invalid BIP-322 signature"
 
 
+def _derive_stage(config, dist: Path) -> tuple[str, list[str]]:
+    version_dir=dist/'versions'/config['version'];errors=[]
+    if not version_dir.is_dir():return 'initialized',errors
+    manifest=version_dir/'organa-cell.json';request_path=version_dir/'signature-request.json'
+    if not manifest.is_file() or not request_path.is_file():return 'initialized',['incomplete build artifacts']
+    manifest_hash=_sha(manifest.read_bytes());request=_json(request_path)
+    if request.get('manifest_sha256')!=manifest_hash or request.get('message')!=_expected_message(config,manifest_hash):return 'built',['candidate integrity invalid']
+    claim_path=version_dir/'controller-claim.json'
+    if not claim_path.is_file():return 'verified',errors
+    claim=_json(claim_path);valid,error=_bip322_verify(config['controller_address'],request['message'],claim.get('signature',''))
+    if claim.get('manifest_sha256')!=manifest_hash or claim.get('message')!=request['message'] or not valid:return 'verified',['controller claim invalid: '+error]
+    resolver_path=dist/'.well-known/organa.json'
+    if not resolver_path.is_file():return 'signed',['canonical resolver missing']
+    resolver=_json(resolver_path);cc=resolver.get('controller_claim') or {};cm=resolver.get('current_manifest') or {}
+    expected_claim_hash=_sha(claim_path.read_bytes())
+    if resolver.get('activation_status')=='active' and cc.get('status')=='signed' and cc.get('signed_claim_sha256')==expected_claim_hash and cm.get('sha256')==manifest_hash and cm.get('lifecycle_status')=='live':return 'active',errors
+    return 'signed',errors
+
+
 def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -189,6 +208,7 @@ def activate(project: Path):
 def doctor(project: Path):
     project, config, state, dist = _load(project)
     artifact_check = None
+    derived_stage, stage_errors = _derive_stage(config, dist)
     if state["stage"] != "initialized":
         try:
             artifact_check = verify(project)
@@ -205,6 +225,8 @@ def doctor(project: Path):
     }
     blockers = [name for name, passed in checks.items() if passed is False]
     if artifact_check is not None and not artifact_check.get("ok"):blockers.append("artifact_integrity_or_state")
+    if state["stage"] != derived_stage:blockers.append("state_integrity_or_transition")
+    blockers.extend(error for error in stage_errors if error not in blockers)
     next_action = {
         "initialized": "Run build, then verify.",
         "built": "Run verify and fix every reported error.",
@@ -213,9 +235,10 @@ def doctor(project: Path):
         "signed": "Run activate and publish the updated Canonical Resolver.",
         "active": "Complete a public task and request independent-controller verification before network registration.",
     }.get(state["stage"], "Inspect project state.")
-    return {"ok": not blockers, "stage": state["stage"], "checks": checks, "artifact_verification": artifact_check, "independent_adoption": independence, "blockers": blockers, "next_action": next_action, "human_required": ["Confirm Bitmap control", "Publish from participant-owned account", "Personally approve final BIP-322 wallet signature"], "never_share": ["seed phrase", "private key", "wallet password", "transaction", "PSBT", "API key"]}
+    return {"ok": not blockers, "stage": state["stage"], "derived_stage": derived_stage, "checks": checks, "artifact_verification": artifact_check, "independent_adoption": independence, "blockers": blockers, "next_action": next_action, "human_required": ["Confirm Bitmap control", "Publish from participant-owned account", "Personally approve final BIP-322 wallet signature"], "never_share": ["seed phrase", "private key", "wallet password", "transaction", "PSBT", "API key"]}
 
 
 def status(project: Path):
     _, config, state, dist = _load(project)
-    return {**state,"coordinate":config['coordinate'],"dist_exists":dist.is_dir()}
+    derived_stage, errors = _derive_stage(config, dist)
+    return {**state,"stage":derived_stage,"recorded_stage":state['stage'],"state_consistent":derived_stage==state['stage'] and not errors,"state_errors":errors,"coordinate":config['coordinate'],"dist_exists":dist.is_dir()}

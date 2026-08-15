@@ -38,6 +38,19 @@ def test_message_self_hash_rewrite_is_not_canonical(tmp_path):
     assert any('canonically bound' in x for x in result['errors'])
 
 
+def test_forged_active_state_is_not_trusted(tmp_path):
+    init(tmp_path,coordinate="123.bitmap",controller_address=A,base_url=B,cell_name="Test")
+    build(tmp_path)
+    state=tmp_path/'.cell-kit-state.json';data=json.loads(state.read_text());data['stage']='active';state.write_text(json.dumps(data))
+    from organa_cell_kit.workflow import status
+    current=status(tmp_path);audit=doctor(tmp_path)
+    assert current['stage']=='verified'
+    assert current['recorded_stage']=='active'
+    assert current['state_consistent'] is False
+    assert audit['ok'] is False
+    assert 'state_integrity_or_transition' in audit['blockers']
+
+
 def test_doctor_never_claims_independence_verified(tmp_path):
     init(tmp_path,coordinate="123.bitmap",controller_address=A,base_url=B,cell_name="Test")
     result=doctor(tmp_path)
