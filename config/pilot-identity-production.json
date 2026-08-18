@@ -1,0 +1,24 @@
+{
+  "mode": "two-role-requester-worker-same-controller-pilot",
+  "pilot_id": "dq-n6-two-role-production-001",
+  "claims_scope": {
+    "independent_controller": false,
+    "external_adoption": false,
+    "real_payment": false
+  },
+  "requester": {
+    "agent_id": "dq",
+    "cell_coordinate": "7187.bitmap",
+    "controller_address": "bc1p4wz46fk45hp5crm56k4emxelln9tpuc76frn2duumlyecr9ft35qjxmadq",
+    "wallet_identity_claim": "human-wallet-bip322-simple-message",
+    "provenance": "existing public 7187 claim"
+  },
+  "worker": {
+    "agent_id": "n6",
+    "cell_coordinate": "720202.bitmap",
+    "controller_address": "bc1qe45ynsz8tkky0nmxfuvjga7z0lwkalfkxkdln6",
+    "wallet_identity_claim": "human-wallet-bip322-simple-message",
+    "provenance": "existing public 720202 claim"
+  },
+  "verifier_status": "pending-registration"
+}
