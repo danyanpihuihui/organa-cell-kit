@@ -925,7 +925,7 @@ def test_hash_closed_artifacts_use_closed_schemas(tmp_path: Path, artifact: str,
     else: obj = target
     if mutation == "unknown": obj["unexpected"] = True
     else:
-        required = {"board": "workers", "task": "status", "worker_advertisement": "status", "acceptance": "status", "worker_result": "claimed_status", "verification": "result", "initial_ledger": "balances", "final_ledger": "balances", "settlement": "status", "receipt": "claims_scope", "project_binding": "absolute_root", "roles": "worker", "reputation_envelope": "chain_head", "trusted_verifier": "expected_path"}[artifact]
+        required = {"board": "workers", "task": "status", "worker_advertisement": "status", "acceptance": "status", "worker_result": "claimed_status", "verification": "result", "initial_ledger": "balances", "final_ledger": "balances", "settlement": "status", "receipt": "claims_scope", "project_binding": "absolute_root", "roles": "worker", "reputation_envelope": "chain_head", "trusted_verifier": "module_path"}[artifact]
         obj.pop(required, None)
     _write(target_path, target); rehash_receipt_artifacts(directory)
     assert verify_receipt(receipt_file)["ok"] is False
@@ -946,16 +946,19 @@ def test_coordinator_rejects_open_or_incomplete_input_schemas(tmp_path: Path, ar
         run_production_loop(root=tmp_path, board_path=tmp_path / "board.json", acceptance_path=Path(prepared["acceptance_path"]), worker_result_path=Path(prepared["worker_result_path"]), budget=10)
 
 
-def test_trusted_verifier_descriptor_binds_exact_installed_path(tmp_path: Path):
-    result = run_demo(tmp_path); receipt = load(Path(result["receipt_path"])); expected = str(Path(__file__).parents[1] / "src" / "organa_cell_kit" / "trusted_verifier.py")
-    assert receipt["trusted_verifier"]["expected_path"] == expected
-    assert load(Path(result["receipt_path"]).parent / "task.json")["frozen_task"]["trusted_verifier"]["expected_path"] == expected
+def test_trusted_verifier_descriptor_is_install_root_independent(tmp_path: Path):
+    result = run_demo(tmp_path)
+    receipt = load(Path(result["receipt_path"]))
+    expected = "organa_cell_kit/trusted_verifier.py"
+    assert receipt["trusted_verifier"]["module_path"] == expected
+    assert load(Path(result["receipt_path"]).parent / "task.json")["frozen_task"]["trusted_verifier"]["module_path"] == expected
+    assert "expected_path" not in receipt["trusted_verifier"]
 
 
-def test_receipt_rejects_changed_verifier_path_even_when_rehashed(tmp_path: Path):
+def test_receipt_rejects_changed_verifier_module_path_even_when_rehashed(tmp_path: Path):
     result = run_demo(tmp_path); directory = Path(result["receipt_path"]).parent
-    task = load(directory / "task.json"); task["frozen_task"]["trusted_verifier"]["expected_path"] = "/tmp/replacement.py"; task["task_hash"] = canonical_sha256(task["frozen_task"]); _write(directory / "task.json", task)
-    receipt = load(directory / "receipt.json"); receipt["trusted_verifier"]["expected_path"] = "/tmp/replacement.py"; _write(directory / "receipt.json", receipt); rehash_receipt_artifacts(directory)
+    task = load(directory / "task.json"); task["frozen_task"]["trusted_verifier"]["module_path"] = "replacement/trusted_verifier.py"; task["task_hash"] = canonical_sha256(task["frozen_task"]); _write(directory / "task.json", task)
+    receipt = load(directory / "receipt.json"); receipt["trusted_verifier"]["module_path"] = "replacement/trusted_verifier.py"; _write(directory / "receipt.json", receipt); rehash_receipt_artifacts(directory)
     assert verify_receipt(directory / "receipt.json")["ok"] is False
 
 

@@ -42,7 +42,7 @@ WORKER_RESULT_KEYS = {"schema_version", "task_hash", "frozen_task", "acceptance_
 VERIFICATION_KEYS = {"schema_version", "task_hash", "package_hash", "verifier_id", "trusted_verifier", "separate_process_verifier_rerun", "result"}
 LEDGER_KEYS = {"schema_version", "unit", "real_payment", "balances", "settled_task_hashes"}
 SETTLEMENT_KEYS = {"task_hash", "amount", "budget_before", "budget_after", "status", "unit", "real_payment", "payer", "payee", "prestate_hash", "poststate_hash"}
-TRUSTED_VERIFIER_KEYS = {"id", "version", "sha256", "expected_path"}
+TRUSTED_VERIFIER_KEYS = {"id", "version", "sha256", "module_path"}
 ROLE_KEYS = {"agent_id", "cell_coordinate"}
 ROLES_KEYS = {"requester", "worker", "verifier"}
 REPUTATION_ENVELOPE_KEYS = {"event_count", "chain_head"}
@@ -458,11 +458,11 @@ def _trusted_verifier_descriptor() -> dict:
         raise ProductionLoopError("trusted verifier installed file is missing") from exc
     if path != expected.resolve() or not path.is_file() or path.is_symlink():
         raise ProductionLoopError("trusted verifier installed file is not a safe regular file")
-    return {"id": trusted_verifier.VERIFIER_ID, "version": trusted_verifier.VERIFIER_VERSION, "sha256": "sha256:" + _file_sha256(path), "expected_path": str(expected)}
+    return {"id": trusted_verifier.VERIFIER_ID, "version": trusted_verifier.VERIFIER_VERSION, "sha256": "sha256:" + _file_sha256(path), "module_path": "organa_cell_kit/trusted_verifier.py"}
 
 
 _TRUSTED_VERIFIER_PATH = Path(__file__).with_name("trusted_verifier.py").absolute()
-TRUSTED_VERIFIER = {"id": "organa-cell-kit.trusted-package-verifier", "version": "1.0.0", "sha256": "sha256:" + _file_sha256(_TRUSTED_VERIFIER_PATH), "expected_path": str(_TRUSTED_VERIFIER_PATH)}
+TRUSTED_VERIFIER = {"id": "organa-cell-kit.trusted-package-verifier", "version": "1.0.0", "sha256": "sha256:" + _file_sha256(_TRUSTED_VERIFIER_PATH), "module_path": "organa_cell_kit/trusted_verifier.py"}
 
 
 def _run_trusted_verifier(package_dir: Path, task: dict) -> tuple[dict, dict]:
